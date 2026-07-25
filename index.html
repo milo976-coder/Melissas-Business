@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{
     --bg: #1f1420;
@@ -588,6 +590,37 @@
     render();
   }
 
+  function sanitizeFilename(s){
+    return String(s).trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g,'') || 'sale';
+  }
+
+  async function downloadReceipt(sale, format, btn){
+    const receiptEl = document.querySelector('.modal-overlay .receipt');
+    if(!receiptEl || !window.html2canvas) { showToast("Couldn't generate the file"); return; }
+    const originalLabel = btn ? btn.textContent : '';
+    if(btn){ btn.disabled = true; btn.textContent = 'Preparing…'; }
+    try{
+      const canvas = await html2canvas(receiptEl, { backgroundColor: '#fbf6ea', scale: 2 });
+      const fname = `receipt-${sanitizeFilename(sale.customer)}-${sale.date}`;
+      if(format === 'png'){
+        const link = document.createElement('a');
+        link.download = fname + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      } else {
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit:'px', format:[canvas.width, canvas.height] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save(fname + '.pdf');
+      }
+    }catch(e){
+      console.error(e);
+      showToast("Couldn't generate the file");
+    }
+    if(btn){ btn.disabled = false; btn.textContent = originalLabel; }
+  }
+
   function showReceiptModal(sale){
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -599,11 +632,17 @@
           <div class="receipt-total"><span>${escapeHtml(sale.customer)}</span><span>${money(sale.total)}</span></div>
           <div class="receipt-foot">${sale.payment}</div>
         </div>
-        <button class="btn-primary" style="margin-top:20px;" id="closeReceiptBtn">Done</button>
+        <div style="display:flex;gap:10px;margin-top:20px;">
+          <button class="btn-secondary" style="flex:1;" id="downloadPngBtn">Save image</button>
+          <button class="btn-secondary" style="flex:1;" id="downloadPdfBtn">Save PDF</button>
+        </div>
+        <button class="btn-primary" style="margin-top:10px;" id="closeReceiptBtn">Done</button>
       </div>
     `;
     document.body.appendChild(overlay);
     overlay.querySelector('#closeReceiptBtn').onclick = ()=> overlay.remove();
+    overlay.querySelector('#downloadPngBtn').onclick = e=> downloadReceipt(sale, 'png', e.currentTarget);
+    overlay.querySelector('#downloadPdfBtn').onclick = e=> downloadReceipt(sale, 'pdf', e.currentTarget);
     overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
   }
 
@@ -650,7 +689,10 @@
           </div>
           <div class="sale-details ${open?'open':''}">
             ${s.items.map(it=>`<div class="sale-item-line"><span>${it.qty} × ${escapeHtml(it.name)}</span><span>${money(it.price*it.qty)}</span></div>`).join('')}
-            <button class="btn-danger-text" data-void="${s.id}">Void this sale</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+              <button class="link-btn" data-receipt="${s.id}" style="padding:6px 0;">View / download receipt</button>
+              <button class="btn-danger-text" data-void="${s.id}">Void this sale</button>
+            </div>
           </div>
         </div>`;
       }).join('');
@@ -930,7 +972,7 @@
       }
       main.querySelectorAll('.sale-card').forEach(card=>{
         card.addEventListener('click', e=>{
-          if(e.target.dataset.void) return;
+          if(e.target.dataset.void || e.target.dataset.receipt) return;
           const id = card.dataset.saleId;
           state.openSaleId = state.openSaleId===id ? null : id;
           render();
@@ -938,6 +980,13 @@
       });
       main.querySelectorAll('[data-void]').forEach(btn=>{
         btn.onclick = e=>{ e.stopPropagation(); voidSale(btn.dataset.void); };
+      });
+      main.querySelectorAll('[data-receipt]').forEach(btn=>{
+        btn.onclick = e=>{
+          e.stopPropagation();
+          const s = state.sales.find(x=>x.id===btn.dataset.receipt);
+          if(s) showReceiptModal(s);
+        };
       });
     }
 
