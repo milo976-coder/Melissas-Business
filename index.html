@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-<title>The Sweet Ledger</title>
+<title>Melissa's Ledger</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
@@ -61,6 +61,7 @@
     font-size: 22px;
     letter-spacing: 0.2px;
     color: var(--cream);
+    line-height: 1.25;
   }
   .brand .dot{ color: var(--gold); }
   .sync-btn{
@@ -274,7 +275,7 @@
   <header class="top">
     <div class="brand-row">
       <div>
-        <div class="brand">The Sweet <span class="dot">Ledger</span></div>
+        <div class="brand">Melissa's <span class="dot">Ledger</span></div>
         <div class="subtitle" id="subtitleText">Sales &amp; stock, live across the team</div>
       </div>
       <button class="sync-btn" id="syncBtn">
@@ -355,6 +356,25 @@
   function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
   function money(n){ return '$' + (Math.round(n*100)/100).toFixed(2); }
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function todayStr(){
+    const d = new Date();
+    const tz = d.getTimezoneOffset()*60000;
+    return new Date(d - tz).toISOString().slice(0,10);
+  }
+  function formatDateStr(dateStr){
+    if(!dateStr) return '';
+    const d = new Date(dateStr+'T00:00:00');
+    return d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric', year:'numeric'});
+  }
+  function formatDateShort(dateStr){
+    if(!dateStr) return '';
+    const d = new Date(dateStr+'T00:00:00');
+    const today = todayStr();
+    const y = new Date(new Date(today+'T00:00:00') - 86400000).toISOString().slice(0,10);
+    if(dateStr===today) return 'Today';
+    if(dateStr===y) return 'Yesterday';
+    return d.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
+  }
 
   const state = {
     products: [],
@@ -362,7 +382,7 @@
     tab: 'sale',
     loaded: false,
     saving: false,
-    saleDraft: { customer: '', payment: 'MPaisa', items: {} }, // items: {productId: qty}
+    saleDraft: { customer: '', payment: 'MPaisa', date: todayStr(), items: {} }, // items: {productId: qty}
     logSearch: '',
     openSaleId: null,
     productsEditMode: false,
@@ -515,10 +535,16 @@
           <label>Customer</label>
           <input type="text" id="custInput" placeholder="e.g. Andrew, or Henry &amp; Keli" value="${escapeHtml(state.saleDraft.customer)}">
         </div>
-        <div class="field">
-          <label>Payment mode</label>
-          <div class="chip-group">
-            ${PAYMENT_MODES.map(m=>`<button class="chip ${state.saleDraft.payment===m?'active':''}" data-payment="${m}">${m}</button>`).join('')}
+        <div class="field-row">
+          <div class="field">
+            <label>Date</label>
+            <input type="date" id="dateInput" value="${escapeHtml(state.saleDraft.date)}">
+          </div>
+          <div class="field">
+            <label>Payment mode</label>
+            <div class="chip-group">
+              ${PAYMENT_MODES.map(m=>`<button class="chip ${state.saleDraft.payment===m?'active':''}" data-payment="${m}">${m}</button>`).join('')}
+            </div>
           </div>
         </div>
       </div>
@@ -548,6 +574,7 @@
       id: uid(),
       customer: state.saleDraft.customer.trim(),
       payment: state.saleDraft.payment,
+      date: state.saleDraft.date || todayStr(),
       items,
       total,
       timestamp: Date.now()
@@ -557,7 +584,7 @@
     await persistSales();
     setSyncing(false);
     showReceiptModal(sale);
-    state.saleDraft = { customer:'', payment:'MPaisa', items:{} };
+    state.saleDraft = { customer:'', payment:'MPaisa', date: todayStr(), items:{} };
     render();
   }
 
@@ -567,7 +594,7 @@
     overlay.innerHTML = `
       <div class="modal" style="background:transparent;border:none;padding-bottom:calc(28px + env(safe-area-inset-bottom));">
         <div class="receipt">
-          <div class="receipt-head">Sale recorded<small>${new Date(sale.timestamp).toLocaleString([], {dateStyle:'medium', timeStyle:'short'})}</small></div>
+          <div class="receipt-head">Sale recorded<small>${formatDateStr(sale.date)}</small></div>
           ${sale.items.map(it=>`<div class="receipt-line"><span class="ln-name">${it.qty} × ${escapeHtml(it.name)}</span><span>${money(it.price*it.qty)}</span></div>`).join('')}
           <div class="receipt-total"><span>${escapeHtml(sale.customer)}</span><span>${money(sale.total)}</span></div>
           <div class="receipt-foot">${sale.payment}</div>
@@ -581,6 +608,10 @@
   }
 
   // ---------- SALES LOG TAB ----------
+  function saleDateStr(s){
+    return s.date || new Date(s.timestamp).toISOString().slice(0,10);
+  }
+
   function renderLogTab(){
     const q = state.logSearch.trim().toLowerCase();
     let sales = state.sales.slice().sort((a,b)=>b.timestamp-a.timestamp);
@@ -594,22 +625,41 @@
       `;
     }
 
-    const rows = sales.map(s=>{
-      const open = state.openSaleId===s.id;
-      return `
-      <div class="card sale-card" data-sale-id="${s.id}">
-        <div class="sale-top">
-          <div>
-            <div class="sale-customer">${escapeHtml(s.customer)}</div>
-            <div class="sale-when">${new Date(s.timestamp).toLocaleString([], {dateStyle:'medium', timeStyle:'short'})} · ${s.payment}</div>
+    // group by date, most recent date first
+    const dateOrder = [];
+    const byDate = {};
+    sales.forEach(s=>{
+      const d = saleDateStr(s);
+      if(!byDate[d]){ byDate[d]=[]; dateOrder.push(d); }
+      byDate[d].push(s);
+    });
+
+    const groupsHtml = dateOrder.map(d=>{
+      const daySales = byDate[d];
+      const dayTotal = daySales.reduce((a,s)=>a+s.total,0);
+      const cardsHtml = daySales.map(s=>{
+        const open = state.openSaleId===s.id;
+        return `
+        <div class="card sale-card" data-sale-id="${s.id}">
+          <div class="sale-top">
+            <div>
+              <div class="sale-customer">${escapeHtml(s.customer)}</div>
+              <div class="sale-when">${new Date(s.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} · ${s.payment}</div>
+            </div>
+            <div class="sale-amt">${money(s.total)}</div>
           </div>
-          <div class="sale-amt">${money(s.total)}</div>
-        </div>
-        <div class="sale-details ${open?'open':''}">
-          ${s.items.map(it=>`<div class="sale-item-line"><span>${it.qty} × ${escapeHtml(it.name)}</span><span>${money(it.price*it.qty)}</span></div>`).join('')}
-          <button class="btn-danger-text" data-void="${s.id}">Void this sale</button>
-        </div>
-      </div>`;
+          <div class="sale-details ${open?'open':''}">
+            ${s.items.map(it=>`<div class="sale-item-line"><span>${it.qty} × ${escapeHtml(it.name)}</span><span>${money(it.price*it.qty)}</span></div>`).join('')}
+            <button class="btn-danger-text" data-void="${s.id}">Void this sale</button>
+          </div>
+        </div>`;
+      }).join('');
+      return `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 8px;">
+        <div class="p-name" style="font-family:'Fraunces',serif;font-size:14.5px;">${formatDateShort(d)}</div>
+        <div class="muted num" style="font-size:12.5px;">${daySales.length} sale${daySales.length===1?'':'s'} · ${money(dayTotal)}</div>
+      </div>
+      ${cardsHtml}`;
     }).join('');
 
     return `
@@ -621,7 +671,7 @@
         <span class="muted" style="font-size:12.5px;text-transform:uppercase;letter-spacing:0.4px;">Grand total</span>
         <span class="num" style="font-size:19px;font-weight:600;color:var(--gold);">${money(grandTotal)}</span>
       </div>
-      ${rows || `<div class="empty">No sales match "${escapeHtml(state.logSearch)}"</div>`}
+      ${groupsHtml || `<div class="empty">No sales match "${escapeHtml(state.logSearch)}"</div>`}
     `;
   }
 
@@ -772,6 +822,16 @@
     });
     const maxPay = Math.max(...Object.values(byPayment).map(v=>v.total), 1);
 
+    const byDate = {};
+    state.sales.forEach(s=>{
+      const d = saleDateStr(s);
+      if(!byDate[d]) byDate[d] = {count:0, total:0};
+      byDate[d].count++;
+      byDate[d].total += s.total;
+    });
+    const dateEntries = Object.keys(byDate).sort((a,b)=>b.localeCompare(a)).slice(0,10);
+    const maxDate = Math.max(...dateEntries.map(d=>byDate[d].total), 1);
+
     const soldMap = {};
     state.products.forEach(p=> soldMap[p.id] = { name:p.name, sold: state.soldFor(p.id) });
     const top = Object.values(soldMap).sort((a,b)=>b.sold-a.sold).filter(x=>x.sold>0).slice(0,5);
@@ -794,6 +854,18 @@
           <div class="bar-row">
             <div class="bar-label"><span>${m} · ${v.count} sale${v.count===1?'':'s'}</span><span class="num">${money(v.total)}</span></div>
             <div class="bar-track"><div class="bar-fill" style="width:${(v.total/maxPay*100).toFixed(1)}%;"></div></div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="card">
+        <div class="p-name" style="margin-bottom:10px;">By date${dateEntries.length>=10?' (last 10 days)':''}</div>
+        ${dateEntries.map(d=>{
+          const v = byDate[d];
+          return `
+          <div class="bar-row">
+            <div class="bar-label"><span>${formatDateShort(d)} · ${v.count} sale${v.count===1?'':'s'}</span><span class="num">${money(v.total)}</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${(v.total/maxDate*100).toFixed(1)}%;background:var(--slate);"></div></div>
           </div>`;
         }).join('')}
       </div>
@@ -824,6 +896,10 @@
       const cust = document.getElementById('custInput');
       if(cust){
         cust.oninput = e=>{ state.saleDraft.customer = e.target.value; updateSubmitState(); };
+      }
+      const dateInp = document.getElementById('dateInput');
+      if(dateInp){
+        dateInp.onchange = e=>{ state.saleDraft.date = e.target.value || todayStr(); };
       }
       main.querySelectorAll('[data-payment]').forEach(btn=>{
         btn.onclick = ()=>{ state.saleDraft.payment = btn.dataset.payment; render(); focusRestore('sale'); };
