@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "products": {
+      ".read": true,
+      ".write": true
+    },
+    "sales": {
+      ".read": true,
+      ".write": true
+    },
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}
